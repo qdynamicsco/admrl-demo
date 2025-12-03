@@ -1,61 +1,36 @@
-FROM ubuntu:jammy
+FROM debian:bookworm
 
-# Set environment variables
+# Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
-ENV KIOSK_URL="https://google.com"
-ENV DISPLAY=:0
-ENV HOME=/root
-ENV XDG_RUNTIME_DIR=/tmp/xdg
 
-# 1. Setup PPA
-RUN apt-get update && apt-get install -y software-properties-common gpg wget curl && \
-    add-apt-repository ppa:liujianfeng1994/rockchip-multimedia
-
-# 2. Pin the PPA
-# This ensures we get the "rkmpp" version of Chromium
-RUN echo "Package: *\nPin: release o=LP-PPA-liujianfeng1994-rockchip-multimedia\nPin-Priority: 1001\n" > /etc/apt/preferences.d/rockchip-ppa
-
-# 3. Install System & Rockchip Stack
-# REMOVED: rockchip-multimedia-config (Fails in Docker)
-RUN apt-get update && apt-get install -y \
-    xserver-xorg-core \
-    xinit \
-    openbox \
+# Install SSH, EGL test utilities, and dependencies for the Mali driver
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    # SSH Server
     openssh-server \
-    dbus-x11 \
-    udev \
-    sudo \
-    fonts-noto \
+    # EGL/GLES test utilities (es2gears_x11 is in mesa-utils-extra)
     mesa-utils \
+    mesa-utils-extra \
+    kmscube \
+    # Dependency for the Mali .deb package
+    libwayland-client0 \
+    # Basic utilities
     nano \
-    # --- Rockchip Specifics ---
-    librockchip-mpp1 \
-    librockchip-vpu0 \
-    librga2 \
-    gstreamer1.0-rockchip1 \
-    libv4l-rkmpp \
-    chromium \
-    chromium-sandbox \
-    libxcb-dri2-0 \
-    # --------------------------
-    unclutter \
-    --no-install-recommends \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    wget \
+    ca-certificates \
+    # Clean up APT cache
+    && rm -rf /var/lib/apt/lists/*
 
-# 4. Install LibMali Blob (RK3399 / Midgard / r18p0) for Kernel 4.19
-RUN wget https://github.com/tsukumijima/libmali-rockchip/releases/download/v1.9-1-2131373/libmali-midgard-t86x-r18p0-x11-gbm_1.9-1_arm64.deb && \
-    dpkg -i libmali-midgard-t86x-r18p0-x11-gbm_1.9-1_arm64.deb && \
-    rm libmali-midgard-t86x-r18p0-x11-gbm_1.9-1_arm64.deb
+# --- Mali Proprietary Driver Installation ---
 
-# 5. Fix Chromium Permissions for Container
-# Chromium sandbox often fails in containers without SUID fixes, 
-# though running with --no-sandbox (in start.sh) is the primary fix.
-RUN chown root:root /usr/lib/chromium/chrome-sandbox && \
-    chmod 4755 /usr/lib/chromium/chrome-sandbox
+    # Download and install the newer r18p0 driver
+RUN wget https://github.com/tsukumijima/libmali-rockchip/releases/download/v1.9-1-2131373/libmali-midgard-t86x-r18p0-gbm_1.9-1_arm64.deb -O /tmp/mali.deb && \
+    dpkg -i /tmp/mali.deb && \
+    rm /tmp/mali.deb
 
-# Add user to necessary groups
-# 'video' is critical for MPP access on the host
-RUN usermod -a -G video,render,input root
+# Add the Mali library path to the linker
+RUN echo "/usr/lib/aarch64-linux-gnu/mali" > /etc/ld.so.conf.d/mali.conf && \
+    ldconfig
 
 # SSH Configuration
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
@@ -68,19 +43,15 @@ RUN cat /root/.ssh/authorized_keys_alex >> /root/.ssh/authorized_keys && \
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 RUN mkdir -p /run/sshd 
 
-# Openbox Configuration
-RUN mkdir -p /root/.config/openbox
-COPY autostart /root/.config/openbox/autostart
-COPY rc.xml /root/.config/openbox/rc.xml
+# Expose the SSH port
+EXPOSE 22
 
-# Xinit Configuration
-COPY xinitrc /root/.xinitrc
-RUN chmod +x /root/.xinitrc
-COPY xorg.conf /etc/X11/xorg.conf
+# --- Startup Script ---
+# Copy the startup script into the image and make it executable
+COPY start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
 
-# Start Script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-
-# Set the entrypoint
-CMD ["/start.sh"]
+# Set the default command to our startup script.
+# On the real device, the init system (e.g., systemd) should be configured
+# to run this script to start the SSH service.
+CMD ["/usr/local/bin/start.sh"]
