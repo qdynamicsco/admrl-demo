@@ -1,36 +1,35 @@
-FROM debian:bookworm
+FROM debian:trixie
 
-# Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install SSH, EGL test utilities, and dependencies for the Mali driver
+# Install standard graphics stack
+# - libgl1-mesa-dri: Contains the 'panfrost' driver for RK3399
+# - libgles2-mesa: OpenGL ES 2/3 libraries
+# - libgbm1: Generic Buffer Management
+# - kmscube: The test tool
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     # SSH Server
     openssh-server \
-    # EGL/GLES test utilities (es2gears_x11 is in mesa-utils-extra)
+    # MESA/GPU support
+    libgl1-mesa-dri \
+    libgles2 \
+    libegl1 \
+    libgbm1 \
     mesa-utils \
-    mesa-utils-extra \
-    kmscube \
-    # Dependency for the Mali .deb package
-    libwayland-client0 \
+    # Workload
+    cage \
+    chromium \
     # Basic utilities
-    nano \
-    wget \
     ca-certificates \
+    nano \
+    udev \
+    wget \
     # Clean up APT cache
     && rm -rf /var/lib/apt/lists/*
 
-# --- Mali Proprietary Driver Installation ---
-
-    # Download and install the newer r18p0 driver
-RUN wget https://github.com/tsukumijima/libmali-rockchip/releases/download/v1.9-1-2131373/libmali-midgard-t86x-r18p0-gbm_1.9-1_arm64.deb -O /tmp/mali.deb && \
-    dpkg -i /tmp/mali.deb && \
-    rm /tmp/mali.deb
-
-# Add the Mali library path to the linker
-RUN echo "/usr/lib/aarch64-linux-gnu/mali" > /etc/ld.so.conf.d/mali.conf && \
-    ldconfig
+# Add user to video/render groups
+RUN usermod -a -G video,render root
 
 # SSH Configuration
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
