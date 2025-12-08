@@ -3,6 +3,9 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+# Chain our script to launch chrome, but we don't care if it exits
+/usr/local/bin/run-chrome.sh &
+
 # Create the sshd runtime directory if it doesn't exist.
 # This is necessary because /run is a tmpfs that is empty on boot.
 echo "Creating /run/sshd directory for SSH daemon..."

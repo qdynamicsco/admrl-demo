@@ -20,6 +20,9 @@ RUN apt-get update && \
     # Workload
     cage \
     chromium \
+    wlr-randr \
+    # Admiral screenshots
+    grim \
     # Basic utilities
     ca-certificates \
     nano \
@@ -48,6 +51,7 @@ EXPOSE 22
 # --- Startup Script ---
 # Copy the startup script into the image and make it executable
 COPY start.sh /usr/local/bin/start.sh
+COPY run-chrome.sh /usr/local/bin/run-chrome.sh
 RUN chmod +x /usr/local/bin/start.sh
 
 # Set the default command to our startup script.
