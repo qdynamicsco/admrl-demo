@@ -29,16 +29,16 @@ RUN apt-get update && \
     nano \
     udev \
     sudo \
+    v4l-utils \
     # --- Graphics / Wayland Stack ---
     libgl1-mesa-dri \
     libgles2 \
     libegl1 \
     libgbm1 \
     mesa-utils \
-    cage \
-    wlr-randr \
+    weston \
     grim \
-    # --- Rockchip Specific Libraries (From Dockerfile #2) ---
+    # --- Rockchip Specific Libraries ---
     librockchip-mpp1 \
     librockchip-vpu0 \
     librga2 \
@@ -72,8 +72,10 @@ RUN mkdir -p /run/sshd
 # Expose the SSH port
 EXPOSE 22
 
-# 7. Startup Scripts
-# Copy the startup scripts into the image
+# 7. Add Weston Config & Scripts
+# Create the directory for weston config
+RUN mkdir -p /etc/xdg/weston
+COPY weston.ini /etc/xdg/weston/weston.ini
 COPY start.sh /usr/local/bin/start.sh
 COPY run-chrome.sh /usr/local/bin/run-chrome.sh
 RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/run-chrome.sh

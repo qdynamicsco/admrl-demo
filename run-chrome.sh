@@ -1,54 +1,37 @@
 #!/bin/bash
 
-# --- 1. HARDWARE GOVERNORS ---
-echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor > /dev/null
-echo performance | tee /sys/class/devfreq/ff9a0000.gpu/governor > /dev/null
-echo performance | tee /sys/class/devfreq/dmc/governor 2>/dev/null
+# --- 1. HARDWARE INIT ---
+udevadm trigger
+udevadm settle
+echo performance | tee /sys/class/devfreq/dmc/governor > /dev/null 2>&1
+echo performance | tee /sys/class/devfreq/fdab0000.gpu/governor > /dev/null 2>&1
 
-# --- 2. SYSTEM SERVICES ---
-if [ ! -S /run/dbus/system_bus_socket ]; then
-    echo "Starting System DBus..."
-    mkdir -p /run/dbus
-    rm -f /run/dbus/pid
-    dbus-daemon --system --fork
+# --- 2. ENVIRONMENT ---
+export XDG_RUNTIME_DIR=/tmp/xdg
+export WAYLAND_DISPLAY=wayland-1
+mkdir -p $XDG_RUNTIME_DIR
+chmod 0700 $XDG_RUNTIME_DIR
+
+# --- 3. START WESTON ---
+if ! pgrep -x "weston" > /dev/null; then
+    echo "Starting Weston..."
+    weston --socket=$WAYLAND_DISPLAY --backend=drm-backend.so &
+    while [ ! -e "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do sleep 0.1; done
 fi
 
-# --- 3. ENVIRONMENT VARIABLES ---
-export XDG_RUNTIME_DIR=/tmp/xdg
-export LIBSEAT_BACKEND=builtin
-export WLR_LIBINPUT_NO_DEVICES=1
+# --- 4. START CHROMIUM ---
+echo "Starting Chromium with Native PPA Flags..."
 
-# CAGE CONFIGURATION (Safe Mode)
-# We keep noafbc HERE so Cage starts safely on the 4K screen.
-export PAN_MESA_DEBUG=noafbc
-export WLR_SCENE_DISABLE_DIRECT_SCANOUT=1
-
-mkdir -p $XDG_RUNTIME_DIR
-mkdir -p /tmp/shader_cache
-chmod 777 /tmp/shader_cache
-
-# --- 4. EXECUTION ---
-dbus-run-session -- cage -d -- sh -c '
-  wlr-randr --output HDMI-A-1 --mode 1920x1080@60Hz
-  sleep 3
-
-  # WE UNSET NOAFBC HERE!
-  # This gives Chrome access to compression, fixing the bandwidth starvation.
-  unset PAN_MESA_DEBUG
-
-  # vblank_mode=1 is the strict VSync standard (2 is often experimental/undefined).
-  vblank_mode=1 exec chromium \
-    --no-sandbox \
-    --kiosk \
-    --ozone-platform=wayland \
-    --disable-features=ExplicitSyncWayland,OverlayStrategies \
-    --enable-gpu-rasterization \
-    --enable-gpu-compositing \
-    --enable-gpu-vsync \
-    --disable-zero-copy \
-    --disable-gpu-memory-buffer-video-frames \
-    --ignore-gpu-blocklist \
-    --disk-cache-dir=/tmp/shader_cache \
-    --no-first-run \
-    "https://signage-demo.admrl.co"
-'
+exec chromium \
+  --no-sandbox \
+  --ozone-platform=wayland \
+  --no-first-run \
+  --kiosk \
+  --disk-cache-dir=/tmp/shader_cache \
+  --ignore-gpu-blocklist \
+  --disable-gpu-driver-bug-workarounds \
+  --disable-gpu-sandbox \
+  --enable-gpu-rasterization \
+  --enable-features=WaylandWindowDecorations,OverlayStrategies,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL \
+  --disable-software-rasterizer \
+  "https://signage-demo.admrl.co"
