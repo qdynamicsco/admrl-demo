@@ -1,33 +1,40 @@
 #!/bin/bash
 
 # --- 1. HARDWARE INIT ---
+/usr/lib/systemd/systemd-udevd --daemon
 udevadm trigger
 udevadm settle
 
-# --- 2. ENVIRONMENT ---
+# --- 2. SYSTEM SERVICES ---
+if [ ! -S /run/dbus/system_bus_socket ]; then
+    echo "Starting System DBus..."
+    mkdir -p /run/dbus
+    rm -f /run/dbus/pid
+    dbus-daemon --system --fork
+fi
+
+# --- 3. ENVIRONMENT VARIABLES ---
 export XDG_RUNTIME_DIR=/tmp/xdg
-export WAYLAND_DISPLAY=wayland-1
+export WLR_BACKENDS=drm
+export LIBSEAT_BACKEND=builtin
+export WLR_LIBINPUT_NO_DEVICES=1
+
 mkdir -p $XDG_RUNTIME_DIR
 chmod 0700 $XDG_RUNTIME_DIR
 
-# --- 3. START WESTON ---
-if ! pgrep -x "weston" > /dev/null; then
-    echo "Starting Weston..."
-    weston --socket=$WAYLAND_DISPLAY --backend=drm-backend.so &
-    while [ ! -e "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do sleep 0.1; done
-fi
+: "${KIOSK_URL:=https://thank-you.admrl.co}"
 
-# --- 4. START CHROMIUM ---
-echo "Starting Chromium with Native PPA Flags..."
-
-exec chromium \
-  --no-sandbox \
-  --ozone-platform=wayland \
-  --no-first-run \
-  --kiosk \
-  --enable-features=VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization \
-  --enable-gpu-rasterization \
-  --enable-zero-copy \
-  --ignore-gpu-blocklist \
-  --disable-gpu-driver-bug-workarounds \
-  "https://signage-demo.admrl.co"
+# --- 4. EXECUTION ---
+exec dbus-run-session -- cage -- sh -c '
+  exec chromium \
+    --no-sandbox \
+    --ozone-platform=wayland \
+    --no-first-run \
+    --kiosk \
+    --enable-features=VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization \
+    --enable-gpu-rasterization \
+    --enable-zero-copy \
+    --ignore-gpu-blocklist \
+    --disable-gpu-driver-bug-workarounds \
+    "${KIOSK_URL}"
+'

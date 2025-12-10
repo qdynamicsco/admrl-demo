@@ -36,7 +36,7 @@ RUN apt-get update && \
     libegl1 \
     libgbm1 \
     vainfo \
-    weston \
+    cage \
     grim \
     # Media drivers
     $( [ "$(dpkg --print-architecture)" = "amd64" ] && echo "intel-media-va-driver-non-free i965-va-driver" ) \
@@ -66,9 +66,6 @@ RUN mkdir -p /run/sshd
 EXPOSE 22
 
 # 7. Add Weston Config & Scripts
-# Create the directory for weston config
-RUN mkdir -p /etc/xdg/weston
-COPY weston.ini /etc/xdg/weston/weston.ini
 COPY start.sh /usr/local/bin/start.sh
 COPY run-chrome.sh /usr/local/bin/run-chrome.sh
 RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/run-chrome.sh
