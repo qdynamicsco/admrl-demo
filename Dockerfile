@@ -1,40 +1,57 @@
-# Use Debian Bookworm as base image
-FROM debian:trixie
+FROM ubuntu:noble
 
-# Set environment variables
+# Environment Configuration
 ENV DEBIAN_FRONTEND=noninteractive
 ENV KIOSK_URL="https://google.com"
-ENV DISPLAY=:0
-ENV HOME=/root
 ENV XDG_RUNTIME_DIR=/tmp/xdg
+ENV DISPLAY=:0
 
-# Install necessary packages, then remove unnecessary ones
-RUN apt-get update && apt-get install -y \
-    chromium \
-    xserver-xorg-core \
-    xinit \
-    openbox \
+# 1. Setup PPA for Custom Chromium
+# We install software-properties-common first to get add-apt-repository
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    software-properties-common \
+    gpg \
+    wget \
+    curl && \
+    add-apt-repository ppa:xtradeb/apps
+
+# 2. Pin the PPA
+# This ensures we get the "rkmpp" version of Chromium from the PPA
+RUN echo "Package: chromium*\Pin: release o=LP-PPA-xtradeb-apps\nPin-Priority: 1001\n\nPackage: chromium-browser*\Pin: release o=LP-PPA-xtradeb-apps\nPin-Priority: 1001" > /etc/apt/preferences.d/chromium-pin
+
+# 3. Install System, Graphics Stack & Rockchip Chromium
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    # --- Network & Utils ---
     openssh-server \
-    dbus-x11 \
+    ca-certificates \
+    nano \
     udev \
     sudo \
-    fonts-noto \
     mesa-utils \
+    # --- Graphics / Wayland Stack ---
     libgl1-mesa-dri \
-    $( [ "$(dpkg --print-architecture)" = "amd64" ] && echo "intel-media-va-driver i965-va-driver" ) \
+    libgles2 \
+    libegl1 \
+    libgbm1 \
+    vainfo \
+    weston \
+    grim \
+    # Media drivers
+    $( [ "$(dpkg --print-architecture)" = "amd64" ] && echo "intel-media-va-driver-non-free i965-va-driver" ) \
     mesa-va-drivers \
     mesa-vulkan-drivers \
-    vainfo \
-    python3-xdg \
-    unclutter \
-    --no-install-recommends \
-    && apt-get purge -y --auto-remove system-config-printer at-spi2-core \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    # --- Chromium ---
+    chromium \
+    chromium-codecs-ffmpeg-extra \
+    && rm -rf /var/lib/apt/lists/*
 
-# Add user to necessary groups for hardware access
+# 5. User Configuration
+# Add root to video/render groups (Critical for MPP/GPU access)
 RUN usermod -a -G video,render,input root
 
-# SSH Configuration
+# 6. SSH Configuration
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
 ADD https://github.com/danward.keys /root/.ssh/authorized_keys
 ADD https://github.com/alexanderturner.keys /root/.ssh/authorized_keys_alex
@@ -43,19 +60,18 @@ RUN cat /root/.ssh/authorized_keys_alex >> /root/.ssh/authorized_keys && \
     chown root:root /root/.ssh/authorized_keys && \
     chmod 600 /root/.ssh/authorized_keys
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+RUN mkdir -p /run/sshd 
 
-# Openbox Configuration for Kiosk Mode
-RUN mkdir -p /root/.config/openbox
-COPY autostart /root/.config/openbox/autostart
-COPY rc.xml /root/.config/openbox/rc.xml
+# Expose the SSH port
+EXPOSE 22
 
-# Xinit Configuration
-COPY xinitrc /root/.xinitrc
-RUN chmod +x /root/.xinitrc
+# 7. Add Weston Config & Scripts
+# Create the directory for weston config
+RUN mkdir -p /etc/xdg/weston
+COPY weston.ini /etc/xdg/weston/weston.ini
+COPY start.sh /usr/local/bin/start.sh
+COPY run-chrome.sh /usr/local/bin/run-chrome.sh
+RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/run-chrome.sh
 
-# Start Script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-
-# Set the entrypoint
-CMD ["/start.sh"]
+# Set the default command
+CMD ["/usr/local/bin/start.sh"]
