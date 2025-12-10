@@ -31,7 +31,9 @@ exec dbus-run-session -- cage -- sh -c '
     --ozone-platform=wayland \
     --no-first-run \
     --kiosk \
-    --enable-features=VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization \
+    --force-dark-mode \
+    --default-background-color=000000 \
+    --enable-features=WebUIDarkMode,VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization \
     --enable-gpu-rasterization \
     --enable-zero-copy \
     --ignore-gpu-blocklist \
