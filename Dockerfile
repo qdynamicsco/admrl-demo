@@ -18,7 +18,7 @@ RUN apt-get update && \
 
 # 2. Pin the PPA
 # This ensures we get the "rkmpp" version of Chromium from the PPA
-RUN echo "Package: chromium*\Pin: release o=LP-PPA-xtradeb-apps\nPin-Priority: 1001\n\nPackage: chromium-browser*\Pin: release o=LP-PPA-xtradeb-apps\nPin-Priority: 1001" > /etc/apt/preferences.d/chromium-pin
+RUN printf "Package: chromium*\nPin: release o=LP-PPA-xtradeb-apps\nPin-Priority: 1001\n\nPackage: chromium-browser*\nPin: release o=LP-PPA-xtradeb-apps\nPin-Priority: 1001\n" > /etc/apt/preferences.d/chromium-pin
 
 # 3. Install System, Graphics Stack & Rockchip Chromium
 RUN apt-get update && \

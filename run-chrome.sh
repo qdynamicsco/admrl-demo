@@ -25,8 +25,7 @@ chmod 0700 $XDG_RUNTIME_DIR
 : "${KIOSK_URL:=https://thank-you.admrl.co}"
 
 # --- 4. EXECUTION ---
-exec dbus-run-session -- cage -- sh -c '
-  exec chromium \
+exec dbus-run-session -- cage -- chromium \
     --no-sandbox \
     --ozone-platform=wayland \
     --no-first-run \
@@ -39,4 +38,3 @@ exec dbus-run-session -- cage -- sh -c '
     --ignore-gpu-blocklist \
     --disable-gpu-driver-bug-workarounds \
     "${KIOSK_URL}"
-'
