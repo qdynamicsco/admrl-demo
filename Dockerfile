@@ -7,9 +7,12 @@ ENV DISPLAY=:0
 ENV HOME=/root
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
-# Define AppImage URL and path
-ENV APPIMAGE_URL="https://doohly-production-static.s3.ap-southeast-2.amazonaws.com/installers/linux/5.9.3/x86_64/doohly-player-v5.9.3-x86_64.AppImage"
+# Define AppImage Base URL
+ENV APPIMAGE_VERSION="5.9.9"
 ENV APPIMAGE_PATH="/opt/doohly-player.AppImage"
+
+# Use build arguments to determine architecture
+ARG TARGETARCH
 
 # Install necessary packages, then remove unnecessary ones
 RUN apt-get update && apt-get install -y \
@@ -37,13 +40,19 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     libasound2 \
     alsa-utils \
+    curl \
+    ca-certificates \
     --no-install-recommends \
     && apt-get purge -y --auto-remove system-config-printer at-spi2-core \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Download and make AppImage executable
-ADD ${APPIMAGE_URL} ${APPIMAGE_PATH}
-RUN chmod +x ${APPIMAGE_PATH}
+# Download appropriate AppImage based on architecture
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        URL="https://doohly-production-static.s3.ap-southeast-2.amazonaws.com/installers/linux/${APPIMAGE_VERSION}/arm64/doohly-player-v${APPIMAGE_VERSION}-arm64.AppImage"; \
+    else \
+        URL="https://doohly-production-static.s3.ap-southeast-2.amazonaws.com/installers/linux/${APPIMAGE_VERSION}/x86_64/doohly-player-v${APPIMAGE_VERSION}-x86_64.AppImage"; \
+    fi; \
+    curl -L -o ${APPIMAGE_PATH} "${URL}" && chmod +x ${APPIMAGE_PATH}
 
 # Add user to necessary groups for hardware access
 RUN usermod -a -G video,render,input,audio root
