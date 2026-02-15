@@ -11,7 +11,7 @@ mkdir -p -m 0700 /tmp/xdg
 
 # Start essential services
 /usr/sbin/sshd
-dbus-daemon --system
+dbus-daemon --system --fork
 
 # Start the X server and the Openbox session
 # -s 0: disables screensaver timeout

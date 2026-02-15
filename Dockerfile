@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y \
     mesa-vulkan-drivers \
     vainfo \
     python3-xdg \
+    zlib1g-dev \
     unclutter \
     fuse \
     libfuse2 \
