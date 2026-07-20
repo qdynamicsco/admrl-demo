@@ -18,8 +18,8 @@ RUN apk add --no-cache \
 # Create directories
 RUN mkdir -p /usr/share/hassio /var/lib/docker /run/dbus /etc/docker
 
-# Configure Docker daemon for better nested compatibility (allowing iptables for NAT routing)
-RUN echo '{"storage-driver": "vfs"}' > /etc/docker/daemon.json
+# Configure Docker for dynamic MTU safety, high concurrency, and disabled nesting features
+RUN echo '{"max-concurrent-downloads": 10, "mtu": 1400, "features": {"containerd-snapshotter": false}}' > /etc/docker/daemon.json
 
 # Copy startup script
 COPY startup.sh /usr/local/bin/startup.sh

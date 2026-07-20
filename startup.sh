@@ -19,41 +19,25 @@ esac
 
 echo "Detected: $ARCH → $HA_ARCH ($HA_MACHINE)"
 
-# Ensure udev directory exists for supervisor/homeassistant bind mounts
-mkdir -p /run/udev /run/supervisor
+# Ensure udev and dbus directories exist
+mkdir -p /run/udev /run/supervisor /run/dbus /var/run/dbus
 
-# Fake IPv6 procfs if unsupported by host kernel to prevent Docker network creation crashes
-if [ ! -d /proc/sys/net/ipv6 ]; then
-    echo "Faking IPv6 procfs for Docker compatibility..."
-    mkdir -p /tmp/real_net /tmp/mock_ipv6
-    mount --bind /proc/sys/net /tmp/real_net
-    mount -t tmpfs tmpfs /proc/sys/net
+# Share D-Bus socket path between nested structures
+ln -sf /var/run/dbus/system_bus_socket /run/dbus/system_bus_socket
 
-    # Symlink all other items back to real procfs
-    for item in /tmp/real_net/*; do
-        [ -e "$item" ] || continue
-        name=$(basename "$item")
-        ln -s "$item" "/proc/sys/net/$name"
-    done
-
-    # Remove the broken symlink to real non-existent ipv6 and create fake directory
-    rm -f /proc/sys/net/ipv6
-    mkdir -p /proc/sys/net/ipv6
-
-    # Populate mock IPv6 entries recursively
-    echo "1" > /tmp/mock_ipv6/disable_ipv6
-    echo "0" > /tmp/mock_ipv6/accept_ra
-    for link in conf all default lo docker0 hassio; do
-        ln -s . /tmp/mock_ipv6/$link
-    done
-    for i in $(seq 0 9); do
-        ln -s . /tmp/mock_ipv6/br-0$i
-        ln -s . /tmp/mock_ipv6/veth0$i
-    done
-
-    mount --bind /tmp/mock_ipv6 /proc/sys/net/ipv6
-    echo "✅ IPv6 procfs faked."
+# Check if a live host D-Bus system daemon is already mounted/functional
+if dbus-send --system --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1; then
+    echo "✅ Active Host D-Bus detected. Sharing host message bus."
+else
+    echo "No active D-Bus connection. Cleaning stale sockets and starting local D-Bus..."
+    rm -f /run/dbus/system_bus_socket /var/run/dbus/system_bus_socket || true
+    dbus-uuidgen --ensure
+    dbus-daemon --system --fork
 fi
+
+# Start udevd daemon for hardware event propagation
+echo "Starting udevd..."
+udevd --daemon || true
 
 # Start Docker daemon
 echo "Starting Docker daemon..."
@@ -67,8 +51,8 @@ until docker info >/dev/null 2>&1; do
         exit 1
     fi
     echo "Waiting for Docker daemon... ($timeout s)"
-    sleep 3
-    timeout=$((timeout-3))
+    sleep 1
+    timeout=$((timeout-1))
 done
 
 echo "✅ Docker daemon ready."
