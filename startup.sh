@@ -22,9 +22,6 @@ echo "Detected: $ARCH → $HA_ARCH ($HA_MACHINE)"
 # Ensure udev and dbus directories exist
 mkdir -p /run/udev /run/supervisor /run/dbus /var/run/dbus
 
-# Share D-Bus socket path between nested structures
-ln -sf /var/run/dbus/system_bus_socket /run/dbus/system_bus_socket
-
 # Check if a live host D-Bus system daemon is already mounted/functional
 if dbus-send --system --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1; then
     echo "✅ Active Host D-Bus detected. Sharing host message bus."
@@ -57,6 +54,17 @@ done
 
 echo "✅ Docker daemon ready."
 
+# Unblock nested NAT routing for Docker's embedded DNS 
+sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
+
+# Ensure critical files exist so Docker doesn't mount them as empty directories
+[ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
+cp /usr/share/zoneinfo/UTC /etc/localtime 2>/dev/null || true
+echo "UTC" > /etc/timezone
+
+# Bypass Supervisor lockdown by ignoring DinD ecosystem health check failures
+echo '{"ignore_conditions": ["healthy", "supported"]}' > /usr/share/hassio/jobs.json
+
 # Clean up old container
 echo "Cleaning up old Supervisor container..."
 docker rm -f hassio_supervisor 2>/dev/null || true
@@ -71,6 +79,8 @@ docker run -d \
     --privileged \
     --security-opt seccomp=unconfined \
     -v /run/dbus:/run/dbus:ro \
+    -v /run/udev:/run/udev:ro \
+    -v /etc/machine-id:/etc/machine-id:ro \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /usr/share/hassio:/data \
     -e SUPERVISOR_SHARE=/usr/share/hassio \

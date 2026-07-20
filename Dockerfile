@@ -13,6 +13,8 @@ RUN apk add --no-cache \
     udev \
     eudev \
     tzdata \
+    nftables \
+    iptables \
     && rm -rf /var/cache/apk/*
 
 # Create directories
