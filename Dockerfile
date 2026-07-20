@@ -1,16 +1,37 @@
-# Use Ubuntu as base image
-FROM ubuntu:22.04
+# =============================================
+# Home Assistant Supervised + DinD (ARM64 + AMD64)
+# =============================================
+
+FROM docker:29.6.2-dind-alpine3.24 AS dind
 
 # Install dependencies
-RUN apt-get update && \
-    apt-get install -y systemd systemd-sysv docker.io iproute2 && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    bash \
+    curl \
+    jq \
+    dbus \
+    udev \
+    eudev \
+    tzdata \
+    && rm -rf /var/cache/apk/*
 
-# Create a user for login purposes
-RUN useradd -m dockeruser && echo "dockeruser:dockerpassword" | chpasswd && \
-    usermod -aG sudo dockeruser
+# Create directories
+RUN mkdir -p /usr/share/hassio /var/lib/docker /run/dbus /etc/docker
 
-# Set the default entrypoint to systemd
-STOPSIGNAL SIGRTMIN+3
-CMD ["/lib/systemd/systemd"]
+# Configure Docker daemon for better nested compatibility (allowing iptables for NAT routing)
+RUN echo '{"storage-driver": "vfs"}' > /etc/docker/daemon.json
+
+# Copy startup script
+COPY startup.sh /usr/local/bin/startup.sh
+RUN chmod +x /usr/local/bin/startup.sh
+
+EXPOSE 8123
+
+VOLUME ["/usr/share/hassio", "/var/lib/docker"]
+
+ENV \
+    TZ=UTC \
+    SUPERVISOR_SHARE=/usr/share/hassio \
+    SUPERVISOR_NAME=hassio_supervisor
+
+ENTRYPOINT ["/usr/local/bin/startup.sh"]
