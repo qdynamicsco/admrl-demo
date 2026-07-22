@@ -1,7 +1,0 @@
-#!/bin/sh
-
-# Hide the mouse cursor
-unclutter -idle 0.01 -root &
-
-# Start the Doohly Player AppImage
-/opt/doohly-player.AppImage --no-sandbox &

@@ -1,3 +1,4 @@
 #!/bin/sh
-# Launch the openbox session within a dbus environment
-exec dbus-launch --exit-with-session openbox-session
+unclutter -idle 0.01 -root &
+openbox &
+exec dbus-launch --exit-with-session /opt/doohly-player.AppImage --no-sandbox

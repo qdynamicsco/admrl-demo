@@ -1,4 +1,3 @@
-# Use Debian Bookworm as base image
 FROM debian:trixie
 
 # Set environment variables
@@ -8,7 +7,7 @@ ENV HOME=/root
 ENV XDG_RUNTIME_DIR=/tmp/xdg
 
 # Define AppImage Base URL
-ENV APPIMAGE_VERSION="5.9.9"
+ENV APPIMAGE_VERSION="5.9.16"
 ENV APPIMAGE_PATH="/opt/doohly-player.AppImage"
 
 # Use build arguments to determine architecture
@@ -20,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     xinit \
     openbox \
     openssh-server \
+    dbus \
     dbus-x11 \
     udev \
     sudo \
@@ -71,8 +71,6 @@ RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/
 # Openbox Configuration for Kiosk Mode
 # Moved to system-wide config (/etc/xdg/openbox) to keep /root/.config reserved for AppImage
 RUN mkdir -p /etc/xdg/openbox
-COPY autostart /etc/xdg/openbox/autostart
-RUN chmod +x /etc/xdg/openbox/autostart
 COPY rc.xml /etc/xdg/openbox/rc.xml
 
 # Xinit Configuration
