@@ -1,16 +1,169 @@
-# Use Ubuntu as base image
-FROM ubuntu:22.04
+FROM alpine:latest
 
-# Install dependencies
-RUN apt-get update && \
-    apt-get install -y systemd systemd-sysv docker.io iproute2 && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Environment setup
+ENV MOZ_ENABLE_WAYLAND=1
+ENV XDG_RUNTIME_DIR=/tmp/runtime-root
+ENV WAYLAND_DISPLAY=wayland-0
+ENV HOMEPAGE_URL="https://signage-demo.admrl.co/admiral.html"
 
-# Create a user for login purposes
-RUN useradd -m dockeruser && echo "dockeruser:dockerpassword" | chpasswd && \
-    usermod -aG sudo dockeruser
+# Options for AUTO_FULLSCREEN: "true" (fullscreen/maximized), "false" (normal window)
+ENV AUTO_FULLSCREEN="true"
 
-# Set the default entrypoint to systemd
-STOPSIGNAL SIGRTMIN+3
-CMD ["/lib/systemd/systemd"]
+# Install Weston, seatd, eudev (for udev), Mesa 3D, VA-API Drivers, FFmpeg, pciutils, and Firefox
+RUN ARCH=$(uname -m) && \
+    EXTRA_PKGS="" && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        EXTRA_PKGS="intel-media-driver libva-intel-driver"; \
+    fi && \
+    apk add --no-cache \
+        weston \
+        weston-backend-drm \
+        weston-shell-desktop \
+        weston-clients \
+        weston-terminal \
+        seatd \
+        eudev \
+        mesa-gbm \
+        mesa-dri-gallium \
+        mesa-va-gallium \
+        mesa-egl \
+        libva \
+        ffmpeg-libs \
+        libdrm \
+        pciutils \
+        dbus \
+        dbus-x11 \
+        adwaita-icon-theme \
+        firefox-esr \
+        ttf-dejavu \
+        bash \
+        $EXTRA_PKGS
+
+# Configure Weston: idle-time=0 (No Sleep), 1080p mode, panel, background
+RUN mkdir -p /etc/xdg/weston && printf '[core]\n\
+backend=drm-backend.so\n\
+socket-name=wayland-0\n\
+idle-time=0\n\
+\n\
+[shell]\n\
+background-color=0xff1e222a\n\
+panel-position=bottom\n\
+clock-format=24h\n\
+allow-zap=true\n\
+\n\
+[output]\n\
+name=HDMI-A-1\n\
+mode=1920x1080@60\n\
+\n\
+[output]\n\
+name=HDMI-A-2\n\
+mode=1920x1080@60\n' > /etc/xdg/weston/weston.ini
+
+# Add our sandbox rules to ignore non-UI hardware (prevents reloading host disk/network controllers)
+RUN mkdir -p /etc/udev/rules.d && \
+    echo 'ACTION=="add|change", SUBSYSTEM!="drm|graphics|input|tty", OPTIONS:="ignore"' > /etc/udev/rules.d/00-container-sandbox.rules
+
+# Startup script generator
+RUN cat << 'EOF' > /start.sh
+#!/bin/bash
+export XDG_RUNTIME_DIR=/tmp/runtime-root
+export MOZ_ENABLE_WAYLAND=1
+export WAYLAND_DISPLAY=wayland-0
+export NO_AT_BRIDGE=1
+
+# 1. Clean and prepare XDG_RUNTIME_DIR
+rm -rf "$XDG_RUNTIME_DIR"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 0700 "$XDG_RUNTIME_DIR"
+
+# 2. Configure Firefox Policy (Homepage + Hardware Accel)
+mkdir -p /usr/lib/firefox-esr/distribution
+cat << POLICIES > /usr/lib/firefox-esr/distribution/policies.json
+{
+  "policies": {
+    "Homepage": {
+      "URL": "${HOMEPAGE_URL:-https://duckduckgo.com}",
+      "Locked": true,
+      "StartPage": "homepage"
+    },
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "UserMessaging": {
+      "SkipOnboarding": true
+    },
+    "Preferences": {
+      "media.ffmpeg.vaapi.enabled": true,
+      "gfx.webrender.all": true
+    }
+  }
+}
+POLICIES
+
+# 3. Pre-seed Firefox Profile Window Geometry (Prevents 0x0 Fullscreen Crash)
+mkdir -p /root/.mozilla/firefox/profile.default
+cat << PROFILES > /root/.mozilla/firefox/profiles.ini
+[Profile0]
+Name=default
+IsRelative=1
+Path=profile.default
+Default=1
+[General]
+StartWithLastProfile=1
+Version=2
+PROFILES
+SIZEMODE="maximized"
+if [ "$AUTO_FULLSCREEN" = "true" ]; then
+    SIZEMODE="fullscreen"
+fi
+cat << XULSTORE > /root/.mozilla/firefox/profile.default/xulstore.json
+{
+  "chrome://browser/content/browser.xhtml": {
+    "main-window": {
+      "sizemode": "${SIZEMODE}",
+      "width": "1920",
+      "height": "1080",
+      "screenX": "0",
+      "screenY": "0"
+    }
+  }
+}
+XULSTORE
+
+# 4. Setup UDEV Environment (Critical for Seatd & DRM discovery)
+echo "Starting udevd..."
+/sbin/udevd --daemon
+echo "Triggering udev for UI devices..."
+udevadm trigger --action=add --subsystem-match=drm --subsystem-match=graphics --subsystem-match=input --subsystem-match=tty
+udevadm settle
+
+# 5. Setup DBus
+echo "Starting DBus..."
+mkdir -p /run/dbus
+dbus-uuidgen --ensure
+dbus-daemon --system --fork
+eval $(dbus-launch --sh-syntax)
+
+# 6. Start seatd daemon
+echo "Starting seatd..."
+seatd -u root &
+sleep 1
+
+# 7. Start Weston Compositor
+echo "Starting Weston..."
+weston --socket=wayland-0 --config=/etc/xdg/weston/weston.ini &
+
+# 8. Wait for Wayland display socket
+echo "Waiting for Wayland display socket ($WAYLAND_DISPLAY)..."
+while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do
+    sleep 0.5
+done
+sleep 1
+echo "Wayland desktop ready!"
+
+# 9. Launch Firefox
+exec firefox-esr
+EOF
+
+RUN chmod +x /start.sh
+
+CMD ["/start.sh"]
