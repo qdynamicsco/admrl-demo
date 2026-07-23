@@ -1,16 +1,24 @@
-# Use Ubuntu as base image
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
-# Install dependencies
-RUN apt-get update && \
-    apt-get install -y systemd systemd-sysv docker.io iproute2 && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Install QEMU, KVM utilities, kernel module tools, firmware, usbutils and wget
+RUN apt-get update && apt-get install -y \
+    qemu-system-x86 \
+    qemu-utils \
+    kmod \
+    pciutils \
+    usbutils \
+    wget \
+    ovmf \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create a user for login purposes
-RUN useradd -m dockeruser && echo "dockeruser:dockerpassword" | chpasswd && \
-    usermod -aG sudo dockeruser
+# Create directory for the ISO
+RUN mkdir /data
 
-# Set the default entrypoint to systemd
-STOPSIGNAL SIGRTMIN+3
-CMD ["/lib/systemd/systemd"]
+COPY gpu-passthrough.sh /usr/local/bin/gpu-passthrough.sh
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+RUN chmod +x /usr/local/bin/gpu-passthrough.sh /usr/local/bin/entrypoint.sh
+
+EXPOSE 5900
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
