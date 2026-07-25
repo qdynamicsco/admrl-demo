@@ -12,8 +12,8 @@ except ImportError:
 A = "/opt/assets"
 p = argparse.ArgumentParser()
 p.add_argument("--image",  default=f"{A}/sample.jpg")
-p.add_argument("--model",  default=f"{A}/mobilenet_v1_1.0_224_quant.tflite")
-p.add_argument("--labels", default=f"{A}/labels.txt")
+p.add_argument("--model",  default=f"{A}/classify_model.tflite")
+p.add_argument("--labels", default=f"{A}/classify_labels.txt")
 p.add_argument("--cpu", action="store_true", help="skip the NPU (baseline)")
 p.add_argument("--runs", type=int, default=20)
 p.add_argument("--threads", type=int, default=1)
