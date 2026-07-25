@@ -77,11 +77,10 @@ RUN python3 -m venv /venv \
 # Bake model & sample image assets into the image
 WORKDIR /assets
 RUN set -eux; \
-    B=https://storage.googleapis.com/download.tensorflow.org; \
-    curl -fsSL $B/models/mobilenet_v1_1.0_224_quant.tgz \
-        | tar xz mobilenet_v1_1.0_224_quant.tflite; \
-    curl -fsSLo labels.txt $B/data/ImageNetLabels.txt; \
-    curl -fsSLo sample.jpg $B/example_images/YellowLabradorLooking_new.jpg
+    B=https://github.com/google-coral/test_data/raw/master; \
+    curl -fsSLo mobilenet_v1_1.0_224_quant.tflite $B/mobilenet_v1_1.0_224_quant.tflite; \
+    curl -fsSLo labels.txt $B/imagenet_labels.txt; \
+    curl -fsSLo sample.jpg $B/parrot.jpg
 
 
 # ==============================================================================
@@ -114,4 +113,4 @@ COPY classify.py /opt/classify.py
 ENV PATH=/venv/bin:$PATH \
     TEFLON_DELEGATE=/usr/local/lib/libteflon.so
 
-ENTRYPOINT ["python3", "/opt/classify.py"]
+ENTRYPOINT ["/venv/bin/python", "/opt/classify.py"]

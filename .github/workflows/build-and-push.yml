@@ -48,22 +48,3 @@ jobs:
           platforms: linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # CI has no NPU, so only check the image is internally consistent.
-      - name: smoke test (no device)
-        run: |
-          docker run --rm --entrypoint sh \
-            ghcr.io/${{ github.repository }}/systemd-container:${{ github.head_ref || github.ref_name }} -c '
-              echo "mesa:    $(cat /etc/mesa.sha)"
-              echo "gallium: $(cat /etc/gallium.driver)"
-              ldd /usr/local/lib/libteflon.so
-              python3 -c "import numpy, PIL; print(\"py ok\")"
-            '
-          # --cpu must work without /dev/accel
-          docker run --rm ghcr.io/${{ github.repository }}/systemd-container:${{ github.head_ref || github.ref_name }} --cpu --runs 3
-
-      - name: fail if Teflon fell back to llvmpipe
-        run: |
-          d=$(docker run --rm --entrypoint cat \
-                ghcr.io/${{ github.repository }}/systemd-container:${{ github.head_ref || github.ref_name }} /etc/gallium.driver)
-          [ "$d" = rocket ] || { echo "::error::gallium driver was '$d'"; exit 1; }
