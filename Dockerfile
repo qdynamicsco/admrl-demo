@@ -14,7 +14,12 @@ RUN apt-get update && \
     ubuntu-desktop-minimal \
     iproute2 \
     openssh-server \
-    sudo && \
+    wget \
+    sudo \
+    mesa-va-drivers \
+    mesa-vulkan-drivers \
+    intel-media-va-driver \
+    vainfo && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -97,6 +102,13 @@ RUN mkdir -p /etc/dconf/profile && \
     echo "[org/gnome/desktop/screensaver]" >> /etc/dconf/db/local.d/00-noblank && \
     echo "lock-enabled=false" >> /etc/dconf/db/local.d/00-noblank && \
     dconf update
+
+# Install Google Chrome (Avoiding Firefox because Ubuntu forces snapd for it, which we masked)
+RUN wget -q -O chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
+    apt-get update && apt-get install -y ./chrome.deb && \
+    rm chrome.deb && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set the default entrypoint to systemd
 STOPSIGNAL SIGRTMIN+3
