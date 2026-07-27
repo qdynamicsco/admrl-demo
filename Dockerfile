@@ -1,115 +1,91 @@
 # syntax=docker/dockerfile:1
 
-ARG DEBIAN_IMAGE=debian:trixie-20250630-slim
+# ponytail: Trixie was for Mesa headers. Vendor wheels cap at Python 3.12.
+# Bookworm ships Python 3.11 natively, perfectly matching the cp311 wheel.
+ARG DEBIAN_IMAGE=debian:bookworm-slim
 
 # ==============================================================================
-# STAGE 1: Builder
+# STAGE 1: Model Compiler (Heavy)
 # ==============================================================================
 FROM ${DEBIAN_IMAGE} AS builder
 
-ARG MESA_REF=main
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Install build-time dependencies
+# Install thick dependencies for AOT compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ca-certificates build-essential pkg-config \
-      meson ninja-build python3 python3-mako python3-yaml \
-      bison flex \
-      libdrm-dev libexpat1-dev zlib1g-dev libelf-dev llvm-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /src
-
-# Clone Mesa
-RUN git clone --filter=blob:none --branch "${MESA_REF}" --depth=1 \
-      https://gitlab.freedesktop.org/mesa/mesa.git \
- && git -C mesa rev-parse HEAD > /mesa.sha
-
-WORKDIR /src/mesa
-
-# Build Mesa / Teflon
-RUN set -eux; \
-    COMMON="-Dteflon=true -Dvulkan-drivers= -Dplatforms= \
-            -Dglx=disabled -Degl=disabled -Dgbm=disabled \
-            -Dgles1=disabled -Dgles2=disabled \
-            -Dllvm=disabled -Dbuildtype=release"; \
-    if meson setup build -Dgallium-drivers=rocket $COMMON; then \
-        echo rocket > /gallium.driver; \
-    else \
-        rm -rf build; \
-        meson setup build -Dgallium-drivers=llvmpipe -Dllvm=enabled \
-            -Dteflon=true -Dvulkan-drivers= -Dplatforms= \
-            -Dglx=disabled -Degl=disabled -Dgbm=disabled \
-            -Dgles1=disabled -Dgles2=disabled -Dbuildtype=release; \
-        echo llvmpipe > /gallium.driver; \
-    fi; \
-    ninja -C build src/gallium/targets/teflon/libteflon.so; \
-    install -Dm755 build/src/gallium/targets/teflon/libteflon.so \
-        /out/usr/local/lib/libteflon.so
-
-# Auto-detect Debian runtime packages required by libteflon.so
-RUN set -eux; \
-    ldd /out/usr/local/lib/libteflon.so \
-      | awk '/=> \//{print $3}' \
-      | xargs -r -n1 realpath \
-      | sort -u \
-      | xargs -r dpkg-query -S 2>/dev/null \
-      | cut -d: -f1 | tr ',' '\n' | tr -d ' ' \
-      | sort -u > /out/runtime-deps.txt
-
-# Build Python Virtual Environment with TFLite Runtime & OpenCV
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3-venv python3-pip curl \
+      python3-venv python3-pip git curl \
+      libgl1 libglib2.0-0 \
+      cmake build-essential python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /venv \
- && /venv/bin/pip install --no-cache-dir --upgrade pip \
- && /venv/bin/pip install --no-cache-dir numpy pillow opencv-python-headless \
- && ( /venv/bin/pip install --no-cache-dir tflite-runtime \
-      || /venv/bin/pip install --no-cache-dir ai-edge-litert )
+ && /venv/bin/pip install --no-cache-dir --upgrade pip numpy pillow opencv-python-headless
 
-# Bake assets for ALL demos into the image
-WORKDIR /assets
-RUN set -eux; \
-    GC=https://github.com/google-coral/test_data/raw/master; \
-    # Classification assets \
-    curl -fsSLo classify_model.tflite $GC/mobilenet_v1_1.0_224_quant.tflite; \
-    curl -fsSLo classify_labels.txt $GC/imagenet_labels.txt; \
-    curl -fsSLo sample.jpg $GC/parrot.jpg; \
-    # Object Detection assets \
-    curl -fsSLo detect_model.tflite $GC/ssd_mobilenet_v1_coco_quant_postprocess.tflite; \
-    curl -fsSLo detect_labels.txt $GC/coco_labels.txt; \
-    # Sample Video for stream demo (when no webcam present) \
-    curl -fsSLo sample.mp4 https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4
+# Grab the full Toolkit 2 (has the AOT compiler, unlike lite2)
+RUN git clone --depth 1 https://github.com/airockchip/rknn-toolkit2.git /tmp/rknn \
+ && PY_VER=$(python3 -c 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")') \
+ && WHEEL=$(find /tmp/rknn/rknn-toolkit2/packages/ -name "*${PY_VER}*aarch64.whl" | head -n 1) \
+ && test -n "$WHEEL" || (echo "Error: No matching wheel found for Python ${PY_VER}" && exit 1) \
+ && echo "Installing $WHEEL" \
+ && /venv/bin/pip install --no-cache-dir "$WHEEL" \
+ && rm -rf /tmp/rknn
 
-COPY classify.py detect_stream.py /opt/
+# Clone Model Zoo for the conversion script and INT8 calibration dataset
+RUN git clone --depth 1 https://github.com/airockchip/rknn_model_zoo.git /opt/rknn_model_zoo
+
+# ponytail: The python wheel is just a wrapper. We curl the native C++ hardware library directly.
+RUN curl -fsSLo /opt/librknnrt.so https://github.com/airockchip/rknn-toolkit2/raw/refs/heads/master/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so
+
+# Download ONNX & Compile to RKNN
+WORKDIR /opt/rknn_model_zoo/examples/yolo11
+RUN mkdir -p model \
+ && curl -fsSLo model/yolo11n.onnx https://ftrg.zbox.filez.com/v2/delivery/data/95f00b0fc900458ba134f8b180b3f7a1/examples/yolo11/yolo11n.onnx
+
+WORKDIR /opt/rknn_model_zoo/examples/yolo11/python
+RUN /venv/bin/python convert.py ../model/yolo11n.onnx rk3588 i8
+
+# Download sample video for the fallback stream
+RUN mkdir -p /assets && curl -fsSLo /assets/sample.mp4 https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4
+
 
 # ==============================================================================
-# STAGE 2: Runtime
+# STAGE 2: Runtime (Slim)
 # ==============================================================================
 FROM ${DEBIAN_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-COPY --from=builder /out/runtime-deps.txt /tmp/runtime-deps.txt
-
-# Install dynamic dependencies + glib (for OpenCV ffmpeg decoding)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 libglib2.0-0 $(tr '\n' ' ' < /tmp/runtime-deps.txt) \
-    && rm -rf /var/lib/apt/lists/* /tmp/runtime-deps.txt
+      python3-venv python3-pip git \
+      libgl1 libglib2.0-0 \
+      nano \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /out/usr/local/lib/libteflon.so /usr/local/lib/
-COPY --from=builder /venv   /venv
-COPY --from=builder /assets /opt/assets
-COPY --from=builder /opt/   /opt/
-COPY --from=builder /mesa.sha /gallium.driver /etc/
+# ponytail: Added torch and torchvision here as well for runtime decoding.
+RUN python3 -m venv /venv \
+ && /venv/bin/pip install --no-cache-dir --upgrade pip numpy pillow opencv-python-headless \
+ && /venv/bin/pip install --no-cache-dir --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-RUN ldconfig \
- && ldd /usr/local/lib/libteflon.so \
- && ! ldd /usr/local/lib/libteflon.so | grep -q 'not found'
+# Grab only the Lite version for runtime inference
+RUN git clone --depth 1 https://github.com/airockchip/rknn-toolkit2.git /tmp/rknn \
+ && PY_VER=$(python3 -c 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")') \
+ && WHEEL=$(find /tmp/rknn/rknn-toolkit-lite2/packages/ -name "*${PY_VER}*aarch64.whl" | head -n 1) \
+ && test -n "$WHEEL" || (echo "Error: No matching wheel found for Python ${PY_VER}" && exit 1) \
+ && echo "Installing $WHEEL" \
+ && /venv/bin/pip install --no-cache-dir "$WHEEL" \
+ && rm -rf /tmp/rknn
 
-ENV PATH=/venv/bin:$PATH \
-    TEFLON_DELEGATE=/usr/local/lib/libteflon.so
+# Copy the native NPU hardware library into system path
+COPY --from=builder /opt/librknnrt.so /usr/lib/
 
+# Copy the RKNN model, sample video, and the model zoo (detect_stream.py imports the zoo)
+RUN mkdir -p /opt/assets
+COPY --from=builder /opt/rknn_model_zoo/examples/yolo11/model/yolo11.rknn /opt/assets/
+COPY --from=builder /assets/sample.mp4 /opt/assets/
+COPY --from=builder /opt/rknn_model_zoo/ /opt/rknn_model_zoo/
+
+COPY detect_stream.py /opt/
+
+ENV PATH=/venv/bin:$PATH
 ENTRYPOINT ["/venv/bin/python"]
-CMD ["/opt/classify.py"]
+CMD ["/opt/detect_stream.py"]
