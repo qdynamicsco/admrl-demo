@@ -68,6 +68,7 @@ RUN cat << 'EOF' > /start.sh
 #!/bin/bash
 export XDG_RUNTIME_DIR=/tmp/runtime-root
 export MOZ_ENABLE_WAYLAND=1
+export MOZ_WEBRENDER=1
 export WAYLAND_DISPLAY=wayland-0
 export NO_AT_BRIDGE=1
 
@@ -76,8 +77,14 @@ rm -rf "$XDG_RUNTIME_DIR"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 0700 "$XDG_RUNTIME_DIR"
 
-# 2. Configure Firefox Policy (Homepage + Hardware Accel)
+# 2. Configure Firefox Policy (Homepage + Memory Optimization + Hardware Accel)
 mkdir -p /usr/lib/firefox-esr/distribution
+WEBRENDER_ALL="true"
+WEBRENDER_SOFTWARE="false"
+if [ "$GFX_WEBRENDER_SOFTWARE" = "true" ]; then
+    WEBRENDER_ALL="false"
+    WEBRENDER_SOFTWARE="true"
+fi
 cat << POLICIES > /usr/lib/firefox-esr/distribution/policies.json
 {
   "policies": {
@@ -93,11 +100,47 @@ cat << POLICIES > /usr/lib/firefox-esr/distribution/policies.json
     },
     "Preferences": {
       "media.ffmpeg.vaapi.enabled": true,
-      "gfx.webrender.all": true
+      "gfx.webrender.all": ${WEBRENDER_ALL},
+      "gfx.webrender.software": ${WEBRENDER_SOFTWARE},
+      "dom.ipc.processCount": 1,
+      "dom.ipc.processCount.webIsolated": 1,
+      "browser.tabs.remote.separatePrivilegedContentProcess": false,
+      "media.rdd-process.enabled": false,
+      "media.utility-process.enabled": false,
+      "browser.cache.memory.capacity": 32768,
+      "browser.cache.disk.enable": false,
+      "image.mem.surfacecache.max_size_kb": 32768,
+      "browser.sessionhistory.max_entries": 2,
+      "browser.sessionstore.max_tabs_undo": 0,
+      "javascript.options.mem.max": 65536
     }
   }
 }
 POLICIES
+
+# 2b. Configure Architecture & Memory Preferences (Requires defaults/pref/ JS file)
+mkdir -p /usr/lib/firefox-esr/defaults/pref
+cat << 'PREFS' > /usr/lib/firefox-esr/defaults/pref/admiral.js
+pref("gfx.webrender.all", true);
+pref("gfx.webrender.software", false);
+pref("media.ffmpeg.vaapi.enabled", true);
+pref("fission.autostart", false);
+pref("fission.webContentIsolationStrategy", 0);
+pref("dom.ipc.processCount", 1);
+pref("dom.ipc.processCount.webIsolated", 1);
+pref("network.process.enabled", false);
+pref("media.rdd-process.enabled", false);
+pref("media.utility-process.enabled", false);
+pref("browser.tabs.remote.separatePrivilegedContentProcess", false);
+pref("browser.tabs.remote.separatePrivilegedMozillaWebContentProcess", false);
+pref("extensions.webextensions.remote", false);
+pref("browser.cache.memory.capacity", 32768);
+pref("browser.cache.disk.enable", false);
+pref("image.mem.surfacecache.max_size_kb", 32768);
+pref("browser.sessionhistory.max_entries", 2);
+pref("browser.sessionstore.max_tabs_undo", 0);
+pref("javascript.options.mem.max", 65536);
+PREFS
 
 # 3. Pre-seed Firefox Profile Window Geometry (Prevents 0x0 Fullscreen Crash)
 mkdir -p /root/.mozilla/firefox/profile.default
@@ -160,8 +203,12 @@ done
 sleep 1
 echo "Wayland desktop ready!"
 
-# 9. Launch Firefox
-exec firefox-esr
+# 9. Launch Firefox with explicit profile and kiosk fullscreen if requested
+EXTRA_ARGS=""
+if [ "$AUTO_FULLSCREEN" = "true" ]; then
+    EXTRA_ARGS="--kiosk"
+fi
+exec firefox-esr --profile /root/.mozilla/firefox/profile.default $EXTRA_ARGS "${HOMEPAGE_URL}"
 EOF
 
 RUN chmod +x /start.sh
